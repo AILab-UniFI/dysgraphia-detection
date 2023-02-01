@@ -12,8 +12,8 @@ if __name__ == '__main__':
                         help="set which model to use / train, either 'resnet' or 'vit'")  
     parser.add_argument('--csv', action="store_true",
                         help="use pen features stored in csv")
-    parser.add_argument('--features', '-ft', choices=['binary', 'float', 'float2'], default='binary',
-                        help="decide which csv to load, either 'binary, 'float' or 'float2'")
+    parser.add_argument('--bhk', choices=['binary', 'float', 'double'], default='binary',
+                        help="decide which csv to load, either 'binary, 'float' or 'double'")
     parser.add_argument('--weighted_loss', '-wl', action="store_true",
                         help="either using a weighted CrossEntropyLoss or not")
     parser.add_argument('--explain', '-ex', action="store_true",

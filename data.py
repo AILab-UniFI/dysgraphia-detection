@@ -89,7 +89,7 @@ class IAMDL(Dataset):
 
 class DisgraphiaDL(Dataset):
 
-    def __init__(self, base :  str, set : str, device : str, use_csv : bool = False):
+    def __init__(self, base :  str, set : str, device : str, use_csv : bool = False, bhk : str = 'binary'):
         assert set == 'train' or set == 'validation' or set == 'test'
         assert base == 'children' or base == 'adults'
         create_disgraphia_splits(f'/home1/gemelli/dyslexia/data/{base}/png-lines')
@@ -99,7 +99,8 @@ class DisgraphiaDL(Dataset):
         self.max_width, self.max_height = get_base_statistics(base)
         self.device = device
         self.use_csv = use_csv
-        if use_csv: _, self.pen_features = get_bhk_features()
+        self.bhk = bhk
+        if use_csv: _, self.pen_features = get_bhk_features(bhk=bhk)
     
     def __len__(self):
         return len(self.set_samples)
@@ -118,7 +119,7 @@ class DisgraphiaDL(Dataset):
 
         to_pil_image(img).save('prova.png')
         if self.use_csv:
-            pen_features, _ = get_bhk_features(self.set_samples[index], self.BASE.split("/")[1])
+            pen_features, _ = get_bhk_features(self.set_samples[index], self.BASE.split("/")[1], self.bhk)
         return img.to(self.device), label.to(self.device), pen_features.to(self.device)
     
     def __set_samples(self):

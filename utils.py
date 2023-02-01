@@ -110,16 +110,15 @@ def create_authors_per_set():
                             os.path.join(set_dir, writer, png))
 
 def get_bhk_features(filename = '/home1/gemelli/dyslexia/data/children/svg-lines/A01_O_1cb57/row3_O_1cb57.svg', base = 'children', bhk = 'binary'):
+    assert bhk == 'binary' or bhk == 'float' or bhk == 'double'
+    print(f"-> Using Smart Pen Features: {bhk}")
     author = filename.split("/")[-2]
-    line = int(filename.split("/")[-1].split("_")[0].split("row")[1])
-    # print(author, line)
-
+    line = filename.split("/")[-1].split("_")[0]
     csv_path = os.path.join(CSVS, f'{base}_{bhk}.csv')
     df = pd.read_csv(csv_path, header=0, index_col=0)
-    #! TODO: change column indexing -> waiting for new CSVs
-    features = df.loc[author][np.r_[:3, 3 + 11*line:14 + 11*line]]
-    # print(features)
-    features = torch.tensor(features.to_numpy())
-    # print(features)
-    # print(features.shape)
+    global_features = torch.tensor(df.filter(like='global').loc[author].to_numpy())
+    line_features = torch.tensor(df.filter(like=line).loc[author].to_numpy())
+    features = torch.cat((global_features, line_features))
     return features, features.shape[0]
+
+get_bhk_features(bhk='double')

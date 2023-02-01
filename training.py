@@ -28,12 +28,12 @@ DATA = 'IAM/DATA'
 def train(args):
 
     # LOAD DATA
-    if args.csv: model_name = f'{args.base}_{args.model}_f1_csv'
+    if args.csv: model_name = f'{args.base}_{args.model}_f1_{args.bhk}'
     else: model_name = f'{args.base}_{args.model}_f1'
     backbone = f'adults_{args.model}'
 
-    train_data = DisgraphiaDL(args.base, 'train', DEVICE, args.csv)
-    validation_data = DisgraphiaDL(args.base, 'validation', DEVICE, args.csv)
+    train_data = DisgraphiaDL(args.base, 'train', DEVICE, args.csv, args.bhk)
+    validation_data = DisgraphiaDL(args.base, 'validation', DEVICE, args.csv, args.bhk)
 
     # LOAD MODEL
     if args.model == 'vit':
@@ -161,9 +161,9 @@ def train(args):
 def test(args, explain):
 
     # LOAD DATA
-    if args.csv: model_name = f'{args.base}_{args.model}_f1_csv'
+    if args.csv: model_name = f'{args.base}_{args.model}_f1_{args.bhk}'
     else: model_name = f'{args.base}_{args.model}_f1'
-    test_data = DisgraphiaDL(args.base, 'test', DEVICE, args.csv)
+    test_data = DisgraphiaDL(args.base, 'test', DEVICE, args.csv, args.bhk)
 
     # LOAD MODEL
     if args.model == 'vit':
