@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# User defined
+checkpoints
+IAM
+data
+wandb
+zips
