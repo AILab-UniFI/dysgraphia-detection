@@ -19,11 +19,7 @@ random.seed(42)
 
 from model import ViTWrapper, ResnetWrapper
 from data import DisgraphiaDL
-
-DEVICE = 'cuda:0'
-XML = 'IAM/xml'
-SETS = 'IAM/SETS'
-DATA = 'IAM/DATA'
+from path import *
 
 def train(args):
 

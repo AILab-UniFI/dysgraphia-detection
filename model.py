@@ -5,7 +5,7 @@ from vit_pytorch import SimpleViT
 import os
 from torchvision.models import resnet18, ResNet18_Weights
 
-CHECKPOINTS = 'checkpoints'
+from path import *
 
 class ViTWrapper():
     def __init__(self, name = 'vit', device = 'cpu', classes = 2, pretrain = False, pen_features : int = 0):

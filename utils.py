@@ -9,8 +9,9 @@ import pandas as pd
 import numpy as np
 random.seed(42)
 
+from path import *
+
 SETS = ['trainset.txt', 'validationset.txt', 'testset.txt']
-CSVS = 'data/csv'
 
 def get_IAM_statistics():
     h = []
@@ -28,7 +29,7 @@ def get_IAM_statistics():
                 h.append(img_size[1])
                 w.append(img_size[0])
     # images = torch.stack(images, dim=0)
-    #mean = torch.mean(images)
+    # mean = torch.mean(images)
     # std = torch.std(images)
 
     # print(mean, std)
@@ -38,7 +39,7 @@ def get_IAM_statistics():
 def get_base_statistics(base):
     h = []
     w = []
-    lines = f'/home1/gemelli/dyslexia/data/{base}/lines'
+    lines = DYSG / f'{base}/original'
     for author in os.listdir(lines):
         aut_dir = os.path.join(lines, author)
         for line in os.listdir(aut_dir):
@@ -109,16 +110,14 @@ def create_authors_per_set():
                 shutil.copy(os.path.join(DATA, dir, subdir, png), 
                             os.path.join(set_dir, writer, png))
 
-def get_bhk_features(filename = '/home1/gemelli/dyslexia/data/children/svg-lines/A01_O_1cb57/row3_O_1cb57.svg', base = 'children', bhk = 'binary'):
+def get_bhk_features(filename = os.path.join(DYSG,'children/svg-lines/A01_O_1cb57/row3_O_1cb57.svg'), base = 'children', bhk = 'binary'):
     assert bhk == 'binary' or bhk == 'float' or bhk == 'double'
     print(f"-> Using Smart Pen Features: {bhk}")
     author = filename.split("/")[-2]
     line = filename.split("/")[-1].split("_")[0]
-    csv_path = os.path.join(CSVS, f'{base}_{bhk}.csv')
+    csv_path = CSVS / f'{base}_{bhk}.csv'
     df = pd.read_csv(csv_path, header=0, index_col=0)
     global_features = torch.tensor(df.filter(like='global').loc[author].to_numpy())
     line_features = torch.tensor(df.filter(like=line).loc[author].to_numpy())
     features = torch.cat((global_features, line_features))
     return features, features.shape[0]
-
-get_bhk_features(bhk='double')

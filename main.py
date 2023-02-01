@@ -14,6 +14,8 @@ if __name__ == '__main__':
                         help="use pen features stored in csv")
     parser.add_argument('--bhk', choices=['binary', 'float', 'double'], default='binary',
                         help="decide which csv to load, either 'binary, 'float' or 'double'")
+    parser.add_argument('--labels', choices=['certified', 'expert', 'professors'], default='certified',
+                        help="decide which labels to load, either 'certified, 'expert' or 'professors'")
     parser.add_argument('--weighted_loss', '-wl', action="store_true",
                         help="either using a weighted CrossEntropyLoss or not")
     parser.add_argument('--explain', '-ex', action="store_true",
