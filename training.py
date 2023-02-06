@@ -13,23 +13,24 @@ import time
 from math import inf
 import wandb
 from datetime import timedelta
+from mlxtend.evaluate import accuracy_score
 
 wandb.init(project="dyslexia", entity="ailab-unifi")
 random.seed(42)
 
 from model import ViTWrapper, ResnetWrapper
-from data import DisgraphiaDL
+from data import DysgraphiaDL
 from path import *
 
 def train(args):
 
     # LOAD DATA
-    if args.csv: model_name = f'{args.base}_{args.model}_f1_{args.bhk}'
-    else: model_name = f'{args.base}_{args.model}_f1'
+    if args.csv: model_name = f'{args.base}_{args.model}_{args.bhk}_{args.labels}_split{args.split}'
+    else: model_name = f'{args.base}_{args.model}_{args.labels}_split{args.split}'
     backbone = f'adults_{args.model}'
 
-    train_data = DisgraphiaDL(args.base, 'train', DEVICE, args.csv, args.bhk, args.labels)
-    validation_data = DisgraphiaDL(args.base, 'validation', DEVICE, args.csv, args.bhk, args.labels)
+    train_data = DysgraphiaDL(args.base, 'train', DEVICE, args.csv, args.bhk, args.labels, args.split)
+    validation_data = DysgraphiaDL(args.base, 'validation', DEVICE, args.csv, args.bhk, args.labels, args.split)
 
     # LOAD MODEL
     if args.model == 'vit':
@@ -40,21 +41,23 @@ def train(args):
         raise Exception(f'{model} is not a model: selecte either vit or resnet.')
     if args.base == 'children': wrapper.load_state(s = f'{backbone}_model_best.pth')
     if args.csv: wrapper.set_csv_model(args.model)
+    wrapper.print_model()
+    if args.freeze: wrapper.freeze()
     model = wrapper.get_model()
+    wrapper.print_model()
 
     # TRAIN SETTINGS
     epochs = 10000
     start_epoch = 0
-    batch_size = 32
+    batch_size = 64
     best_val_loss = inf
     best_val_f1 = 0.0
     exit_counter = 0
     epsilon = 0.0001 # counter guard precision improovement
-    lr = 0.0001
+    lr = 0.00001
 
     if args.weighted_loss: loss = CrossEntropyLoss(weight=train_data.get_binary_weights())
     else: loss = CrossEntropyLoss()
-    print(train_data.get_binary_weights())
     opt = optim.AdamW(model.parameters(), lr=lr)
 
     if args.resume:
@@ -83,7 +86,7 @@ def train(args):
             images, classes, pfeat = next(loader)
 
             opt.zero_grad()
-            if not args.csv: preds  = model(images)
+            if not args.csv: preds = model(images)
             else: preds = model(images, pfeat)
 
             out = loss(preds, classes)
@@ -95,8 +98,8 @@ def train(args):
 
             preds = np.argmax(preds.cpu().detach().numpy(), axis=1)
             classes = np.asarray(classes.cpu())
-            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average='macro', zero_division=1)
-            
+            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
+            # bin_acc = accuracy_score(classes, preds, method='binary', pos_label=1)
             train_f1 += f1
             running_f1 += f1
 
@@ -118,8 +121,9 @@ def train(args):
             out = loss(preds, classes)
             preds = np.argmax(preds.cpu(), axis=1)
             classes = np.asarray(classes.cpu())
-            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average='macro', zero_division=1)
-            
+            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
+            #bin_acc = accuracy_score(classes, preds, method='binary', pos_label=1)
+            f1 = f1[1]
             print(f"Epoch {e + 1}: Validation Loss {out.item()} - Validation F1 {f1}")
             if f1 > best_val_f1 + epsilon:
                 print(f"    !- Validation improovement! {best_val_f1} -> {f1}")
@@ -157,9 +161,9 @@ def train(args):
 def test(args, explain):
 
     # LOAD DATA
-    if args.csv: model_name = f'{args.base}_{args.model}_f1_{args.bhk}'
-    else: model_name = f'{args.base}_{args.model}_f1'
-    test_data = DisgraphiaDL(args.base, 'test', DEVICE, args.csv, args.bhk, args.labels)
+    if args.csv: model_name = f'{args.base}_{args.model}_{args.bhk}_{args.labels}_split{args.split}'
+    else: model_name = f'{args.base}_{args.model}_{args.labels}_split{args.split}'
+    test_data = DysgraphiaDL(args.base, 'test', DEVICE, args.csv, args.bhk, args.labels, args.split)
 
     # LOAD MODEL
     if args.model == 'vit':
@@ -185,6 +189,7 @@ def test(args, explain):
         preds = np.argmax(out.cpu(), axis=1)
         classes = np.asarray(classes.cpu())
         precision, recall, f1, _ = precision_recall_fscore_support(classes, preds, average='macro')
+        accuracy = accuracy_score(classes, preds)
 
         if explain:
             topk = 2
@@ -205,7 +210,7 @@ def test(args, explain):
             shap.image_plot(shap_values=shap_values.values, pixel_values=shap_values.data, 
                             labels=shap_values.output_names, true_labels=class_to_names(classes))
     
-    print("Test Results")
+    print(f"Test Results {model_name}")
     print("---")
     print("Predictions: ", np.asarray(preds.cpu()))
     print("Classes: ", classes)
@@ -213,3 +218,4 @@ def test(args, explain):
     print("Precision:", round(precision, 3))
     print("Recall:", round(recall, 3))
     print("F1:", round(f1, 3))
+    print("Accuracy:", round(accuracy, 3))

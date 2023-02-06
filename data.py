@@ -7,7 +7,7 @@ from torchvision.transforms import Compose, ConvertImageDtype, Pad, Resize, PILT
 from torchvision.transforms.functional import to_pil_image
 import pandas as pd
 
-from utils import create_disgraphia_splits, get_IAM_statistics, get_base_statistics, get_bhk_features
+from utils import create_simple_splits, create_multiple_splits, get_IAM_statistics, get_base_statistics, get_bhk_features
 from path import *
 
 class IAMDL(Dataset):
@@ -89,24 +89,32 @@ class IAMDL(Dataset):
         
         return anchors.to(self.device), positives.to(self.device), negatives.to(self.device)
 
-class DisgraphiaDL(Dataset):
+class DysgraphiaDL(Dataset):
 
-    def __init__(self, base :  str, set : str, device : str, use_csv : bool = False, bhk : str = 'binary', labels = 'certified'):
-        assert set == 'train' or set == 'validation' or set == 'test'
+    def __init__(self, base :  str, set : str, device : str, use_csv : bool = False, bhk : str = 'binary', labels = 'certified', split : int = 0):
         assert base == 'children' or base == 'adults'
-        create_disgraphia_splits(os.path.join(DYSG, f'{base}/original'))
-        self.BASE = DYSG / base
-        self.SET = self.BASE / f"{set}.txt"
+        assert set == 'train' or set == 'validation' or set == 'test'
+        if base == 'children': create_multiple_splits(os.path.join(DYSG, base), os.path.join(DYSG, base, 'labels.csv'))
+        else: create_simple_splits(os.path.join(DYSG, base))
+
+        self.BASE = os.path.join(DYSG,base)
+        self.SET = os.path.join(self.BASE,f"splits/{labels.upper()}/split{split}/{set}.txt")
         self.set_samples = self.__set_samples()
         self.max_width, self.max_height = get_base_statistics(base)
         self.device = device
         self.use_csv = use_csv
         self.bhk = bhk
         self.labels = labels
-        if base == 'children': self.labels_csv = pd.read_csv(self.BASE / 'labels.csv', header=0, index_col=0, sep=";")
-        else: self.labels_csv = None
-        if use_csv: _, self.pen_features = get_bhk_features(bhk=bhk)
-        else: self.pen_feature = 0
+
+        if base == 'children': 
+            self.labels_csv = pd.read_csv(os.path.join(self.BASE,'labels.csv'), header=0, index_col=0, sep=";")
+        else: 
+            self.labels_csv = None
+
+        if use_csv: 
+            _, self.pen_features = get_bhk_features(bhk=bhk)
+        else: 
+            self.pen_features = 0
     
     def __len__(self):
         return len(self.set_samples)
@@ -126,13 +134,14 @@ class DisgraphiaDL(Dataset):
             if 'O' in self.set_samples[index].split("/")[-2]: label = torch.tensor(0)
             else: label = torch.tensor(1)
         else:
-            label = torch.as_tensor(self.labels_csv.filter(like=self.labels.upper()).loc[aut_name].to_numpy())
+            label = self.labels_csv.filter(like=self.labels.upper()).loc[aut_name].values[0]
+            label = torch.tensor(label)
 
         if self.use_csv:
-            pen_features, _ = get_bhk_features(self.set_samples[index], self.BASE.split("/")[1], self.bhk)
+            pen_features, _ = get_bhk_features(self.set_samples[index], self.BASE.split("/")[-1], self.bhk)
             return img.to(self.device), label.to(self.device), pen_features.to(self.device)
         else:
-            return img.to(self.device), label.to(self.device), None
+            return img.to(self.device), label.to(self.device), torch.empty((1))
     
     def __set_samples(self):
         set_samples = []
@@ -149,9 +158,10 @@ class DisgraphiaDL(Dataset):
     def get_binary_weights(self):
         counter = [0, 0]
         for sample in self.set_samples:
-            if '0' in sample.split("/")[-2]: counter[0] += 1
+            author = sample.split("/")[-2]
+            label = self.labels_csv.filter(like=self.labels.upper()).loc[author].values[0]
+            if label == 0: counter[0] += 1
             else: counter[1] += 1
+        print(f"Samples per class: {counter}")
+        print(f"Values: {[min(counter) / counter[0], min(counter) / counter[1]]}")
         return torch.tensor([min(counter) / counter[0], min(counter) / counter[1]]).to(self.device)
-
-data = DisgraphiaDL('children', 'train', DEVICE, labels='expert')
-data[1]

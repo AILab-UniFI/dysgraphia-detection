@@ -7,6 +7,8 @@ from torchvision.transforms.functional import pil_to_tensor, resize
 import random
 import pandas as pd
 import numpy as np
+from itertools import islice
+from sklearn import preprocessing
 random.seed(42)
 
 from path import *
@@ -52,11 +54,11 @@ def get_base_statistics(base):
     
     return max(w), max(h)
 
-def create_disgraphia_splits(path):
-    if os.path.isfile(os.path.join('/'.join(path.split("/")[:-1]), 'train.txt')):
+def create_simple_splits(path):
+    if os.path.isdir(os.path.join(path, 'train.txt')):
         return
     else:
-        print("Creating splits.")
+        print("Creating Simple splits.")
     dis = [filename for filename in os.listdir(path) if 'X' in filename]
     not_dis = [filename for filename in os.listdir(path) if 'O' in filename]
 
@@ -82,6 +84,54 @@ def create_disgraphia_splits(path):
     with open(os.path.join('/'.join(path.split("/")[:-1]), 'test.txt'), 'w') as f:
         for t in test_dis:
             f.write(f"{t}\n")
+
+def create_multiple_splits(path, labels):
+    if os.path.isdir(os.path.join(path, 'splits')):
+        return
+    else:
+        print("Creating Multiple splits.")
+        os.mkdir(os.path.join(path, 'splits'))
+    columns = ['CERTIFIED','EXPERT']
+    labels = pd.read_csv(labels, header=0, index_col=0, sep=";")
+
+    for column in columns:
+        os.mkdir(os.path.join(path, 'splits', column))
+        column_dis = [name for name in labels.loc[labels[column] == 1].index.tolist()]
+        print(column_dis)
+        column_not_dis = [name for name in labels.loc[labels[column] == 0].index.tolist()]
+        if column == 'CERTIFIED': lenght_splits = [int(len(column_dis) / 4), int(len(column_dis) / 4), int(len(column_dis) / 4), len(column_dis) - int(len(column_dis) / 4)*3]
+        else: lenght_splits = [4, 4, 4, 3]
+        random.shuffle(column_dis)
+        it_column_dis = iter(column_dis)
+        tests = [list(islice(it_column_dis, elem)) for elem in lenght_splits]
+        for t, l in enumerate(lenght_splits):
+            # selection = column_not_dis.pop(column_not_dis.index(random.sample(column_not_dis, l)))
+            selection = random.sample(column_not_dis, l)
+            [column_not_dis.remove(s) for s in selection]
+            tests[t].extend(selection)
+        
+        for t, test in enumerate(tests):
+            split = os.path.join(path, 'splits', column, f'split{t}')
+            os.mkdir(split)
+            training = []
+            [training.extend(tt) for i, tt in enumerate(tests) if i != t]
+            column_not_dis_copy = column_not_dis.copy()
+            validation = [random.sample(training, 1)[0], random.sample(column_not_dis_copy, 1)[0]]
+            training.remove(validation[0]), column_not_dis_copy.remove(validation[1])
+            training.extend(column_not_dis_copy)
+            print("Union:",len(training), len(validation), len(test), len(training) + len(validation) + len(test))
+
+            with open(os.path.join(split, "train.txt"), 'w') as output:
+                for row in training:
+                    output.write(str(row) + '\n')
+            
+            with open(os.path.join(split, "validation.txt"), 'w') as output:
+                for row in validation:
+                    output.write(str(row) + '\n')
+            
+            with open(os.path.join(split, "test.txt"), 'w') as output:
+                for row in test:
+                    output.write(str(row) + '\n')
 
 
 def create_authors_per_set():
@@ -110,14 +160,25 @@ def create_authors_per_set():
                 shutil.copy(os.path.join(DATA, dir, subdir, png), 
                             os.path.join(set_dir, writer, png))
 
-def get_bhk_features(filename = os.path.join(DYSG,'children/svg-lines/A01_O_1cb57/row3_O_1cb57.svg'), base = 'children', bhk = 'binary'):
+def get_bhk_features(filename = os.path.join(DYSG,'children/original/A01_1cb57/row3_O_1cb57.png'), base = 'children', bhk = 'binary'):
+    # read
     assert bhk == 'binary' or bhk == 'float' or bhk == 'double'
-    print(f"-> Using Smart Pen Features: {bhk}")
     author = filename.split("/")[-2]
     line = filename.split("/")[-1].split("_")[0]
     csv_path = CSVS / f'{base}_{bhk}.csv'
     df = pd.read_csv(csv_path, header=0, index_col=0)
-    global_features = torch.tensor(df.filter(like='global').loc[author].to_numpy())
-    line_features = torch.tensor(df.filter(like=line).loc[author].to_numpy())
+
+    # normalize
+    min_max_scaler = preprocessing.MinMaxScaler()
+    x_scaled = min_max_scaler.fit_transform(df.values)
+    norm_df = pd.DataFrame(x_scaled)
+    norm_df.columns = df.columns
+    norm_df.index = df.index
+
+    # get features
+    global_features = torch.tensor(norm_df.filter(like='global').loc[author].to_numpy(), dtype=torch.float32)
+    line_features = torch.tensor(norm_df.filter(like=line).loc[author].to_numpy(), dtype=torch.float32)
     features = torch.cat((global_features, line_features))
     return features, features.shape[0]
+
+create_multiple_splits('/home1/gemelli/dysgraphia-detection/data/children', '/home1/gemelli/dysgraphia-detection/data/children/labels.csv')

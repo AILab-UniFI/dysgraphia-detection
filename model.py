@@ -4,6 +4,7 @@ import shutil
 from vit_pytorch import SimpleViT
 import os
 from torchvision.models import resnet18, ResNet18_Weights
+from torchsummary import summary
 
 from path import *
 
@@ -28,7 +29,6 @@ class ViTWrapper():
             self.load_state(s = 'vit_model_best.pth')
             self.model.linear_head = self.__set_head(classes)
         self.model = self.model.to(device)
-        print(self.model)
         return
     
     def __set_head(self, cls):
@@ -81,7 +81,6 @@ class ResnetWrapper():
             self.load_state(s = 'resnet18_model_best.pth')
             self.model.fc = self.__set_head(classes)
         self.model = self.model.to(device)
-        print(self.model)
         return
     
     def __set_head(self, cls):
@@ -92,6 +91,16 @@ class ResnetWrapper():
             nn.Dropout(0.2),
             nn.Linear(100, cls)
         )
+
+    def freeze(self):
+        print("BRRRRRRRRRRRRRRRRR!")
+        for name, param in self.model.named_parameters():
+            if 'model.fc' in name: continue
+            if 'classify' in name: continue
+            param.requires_grad = False
+    
+    def print_model(self):
+        print(self.model)
     
     def get_model(self):
         return self.model
