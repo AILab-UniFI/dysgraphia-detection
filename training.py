@@ -2,12 +2,12 @@ import torch
 from torch.utils.data import DataLoader
 import random
 import numpy as np
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, mean_squared_error
 import shap
 import torch
 from torch.utils.data import DataLoader
 import random
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, Sigmoid, BCELoss, MSELoss, ReLU
 import torch.optim as optim
 import time
 from math import inf
@@ -28,40 +28,49 @@ def train(args):
     if args.csv: model_name = f'{args.base}_{args.model}_{args.bhk}_{args.labels}_split{args.split}'
     else: model_name = f'{args.base}_{args.model}_{args.labels}_split{args.split}'
     backbone = f'adults_{args.model}'
+    out_classes = 2
+    if args.labels == 'professors': out_classes = 1
 
     train_data = DysgraphiaDL(args.base, 'train', DEVICE, args.csv, args.bhk, args.labels, args.split)
     validation_data = DysgraphiaDL(args.base, 'validation', DEVICE, args.csv, args.bhk, args.labels, args.split)
-
+    # print(train_data.pen_features)
     # LOAD MODEL
     if args.model == 'vit':
-        wrapper = ViTWrapper(model_name, DEVICE, pen_features=train_data.pen_features)
+        wrapper = ViTWrapper(model_name, DEVICE, 2, False, pen_features=train_data.pen_features)
     elif args.model == 'resnet':
-        wrapper = ResnetWrapper(model_name, DEVICE, 2, False, train_data.pen_features)
+        wrapper = ResnetWrapper(model_name, DEVICE, 2, False, pen_features=train_data.pen_features)
     else:
         raise Exception(f'{model} is not a model: selecte either vit or resnet.')
     if args.base == 'children': wrapper.load_state(s = f'{backbone}_model_best.pth')
+    if out_classes == 1: wrapper.binary()
     if args.csv: wrapper.set_csv_model(args.model)
-    wrapper.print_model()
     if args.freeze: wrapper.freeze()
     model = wrapper.get_model()
-    wrapper.print_model()
+
+    print(model)
 
     # TRAIN SETTINGS
-    epochs = 10000
+    epochs = 1000
     start_epoch = 0
-    batch_size = 64
+    batch_size = 8
     best_val_loss = inf
-    best_val_f1 = 0.0
+    best_val_crit = inf
     exit_counter = 0
-    epsilon = 0.0001 # counter guard precision improovement
+    epsilon = 0.001 # counter guard precision improovement
     lr = 0.00001
 
-    if args.weighted_loss: loss = CrossEntropyLoss(weight=train_data.get_binary_weights())
-    else: loss = CrossEntropyLoss()
+    if out_classes != 1:
+        if args.weighted_loss: loss = CrossEntropyLoss(weight=train_data.get_binary_weights())
+        else: loss = CrossEntropyLoss()
+    else:
+        act = Sigmoid()
+        func = BCELoss()
+        loss = lambda x, y: func(torch.reshape(act(x), (-1,)), y.type(torch.float32))
+
     opt = optim.AdamW(model.parameters(), lr=lr)
 
     if args.resume:
-        start_epoch, best_val_loss, exit_counter, opt_chk, best_val_f1 = wrapper.resume(f'{model_name}_checkpoint.pth')
+        start_epoch, best_val_loss, exit_counter, opt_chk, best_val_crit = wrapper.resume(f'{model_name}_checkpoint.pth')
         opt.load_state_dict(opt_chk)
 
     wandb.config = {
@@ -78,8 +87,8 @@ def train(args):
         loader = iter(DataLoader(train_data, batch_size=batch_size, shuffle=True))
         train_loss = 0.0
         running_loss = 0.0
-        train_f1 = 0.0
-        running_f1 = 0.0
+        train_crit = 0.0
+        running_crit = 0.0
 
         start = time.time()
         for i in range(0, int(len(train_data) / batch_size) + 1):
@@ -96,21 +105,25 @@ def train(args):
             train_loss += out.item()
             running_loss += out.item()
 
-            preds = np.argmax(preds.cpu().detach().numpy(), axis=1)
             classes = np.asarray(classes.cpu())
-            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
-            # bin_acc = accuracy_score(classes, preds, method='binary', pos_label=1)
-            train_f1 += f1
-            running_f1 += f1
+
+            if out_classes != 1:
+                preds = np.argmax(preds.cpu().detach().numpy(), axis=1)
+                _, _, crit, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
+            else:
+                preds = torch.reshape(act(preds), (-1,)).cpu().detach().numpy()
+                crit = mean_squared_error(classes, preds, squared=False)
+            train_crit += crit
+            running_crit += crit
 
             if i % 5 == 4:
-                print(f'Epoch {e + 1} - Batch {i + 1}: Running Loss {running_loss / 5} / Running F1 {running_f1 / 5}', end='\r')
+                print(f'Epoch {e + 1} - Batch {i + 1}: Running Loss {running_loss / 5} / Running Criteria {running_crit / 5}', end='\r')
                 running_loss = 0.0
-                running_f1 = 0.0
+                running_crit = 0.0
         
         train_loss = train_loss / i
-        train_f1 = train_f1 / i
-        print(f'Epoch {e + 1}: Train Loss {train_loss} - Train F1 {train_f1} - Time {str(timedelta(seconds=time.time() - start))}')
+        train_crit = train_crit / i
+        print(f'Epoch {e + 1}: Train Loss {train_loss} - Train Criteria {train_crit} - Time {str(timedelta(seconds=time.time() - start))}')
 
         model.eval()
         with torch.no_grad():
@@ -119,16 +132,22 @@ def train(args):
             if not args.csv: preds  = model(images)
             else: preds = model(images, pfeat)
             out = loss(preds, classes)
-            preds = np.argmax(preds.cpu(), axis=1)
+            
             classes = np.asarray(classes.cpu())
-            _, _, f1, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
-            #bin_acc = accuracy_score(classes, preds, method='binary', pos_label=1)
-            f1 = f1[1]
-            print(f"Epoch {e + 1}: Validation Loss {out.item()} - Validation F1 {f1}")
-            if f1 > best_val_f1 + epsilon:
-                print(f"    !- Validation improovement! {best_val_f1} -> {f1}")
+            
+            if out_classes != 1:
+                _, _, f1, _ = precision_recall_fscore_support(classes, preds, average=None, zero_division=1)
+                crit = f1[1]
+            else:
+                preds = torch.reshape(act(preds), (-1,)).cpu()
+                crit = mean_squared_error(classes, preds, squared=False)
+
+            val_crit = crit
+            print(f"Epoch {e + 1}: Validation Loss {out.item()} - Validation Criteria {val_crit}")
+            if val_crit < best_val_crit - epsilon:
+                print(f"    !- Validation improovement! {best_val_crit} -> {val_crit}")
                 exit_counter = 0
-                best_val_f1 = f1
+                best_val_crit = val_crit
                 is_best = True
             else:
                 print(f"    !- No improovement!")
@@ -138,8 +157,8 @@ def train(args):
             wandb.log({
                 "train-loss": train_loss,
                 "val-loss": out.item(),
-                "train-f1": train_f1,
-                "val-f1": f1
+                "train-criteria": train_crit,
+                "val-criteria": val_crit
                 })
             # Optional
             wandb.watch(model)
@@ -150,11 +169,11 @@ def train(args):
                 'best_val_loss': best_val_loss,
                 'exit_counter': exit_counter,
                 'optimizer': opt.state_dict(),
-                'best_val_f1': best_val_f1
+                'best_val_crit': best_val_crit
             }
             wrapper.save_state(state, is_best)
         
-        if exit_counter == 50:
+        if exit_counter == 20:
             print("Exit")
             break
 
@@ -165,11 +184,14 @@ def test(args, explain):
     else: model_name = f'{args.base}_{args.model}_{args.labels}_split{args.split}'
     test_data = DysgraphiaDL(args.base, 'test', DEVICE, args.csv, args.bhk, args.labels, args.split)
 
+    out_classes = 2
+    if args.labels == 'professors': out_classes = 1
+
     # LOAD MODEL
     if args.model == 'vit':
-        wrapper = ViTWrapper(model_name, DEVICE, pen_features=test_data.pen_features)
+        wrapper = ViTWrapper(model_name, DEVICE, out_classes, pen_features=test_data.pen_features)
     elif args.model == 'resnet':
-        wrapper = ResnetWrapper(model_name, DEVICE, 2, False, test_data.pen_features)
+        wrapper = ResnetWrapper(model_name, DEVICE, out_classes, False, test_data.pen_features)
     else:
         raise Exception(f'{model} is not a model: selecte either vit or resnet.')
     if args.csv: wrapper.set_csv_model(args.model)
@@ -180,42 +202,57 @@ def test(args, explain):
     with torch.no_grad():
         loader = iter(DataLoader(test_data, batch_size=len(test_data), shuffle=False))
         images, classes, pfeat = next(loader)
+
         def predict(imgs, pfeat):
             if isinstance(imgs, np.ndarray): imgs = torch.tensor(imgs).to(DEVICE)
             if not args.csv: preds  = model(images)
             else: preds = model(images, pfeat)
             return preds
+        
         out = predict(images, pfeat)
-        preds = np.argmax(out.cpu(), axis=1)
-        classes = np.asarray(classes.cpu())
-        precision, recall, f1, _ = precision_recall_fscore_support(classes, preds, average='macro')
-        accuracy = accuracy_score(classes, preds)
 
-        if explain:
-            topk = 2
-            batch_size = 50
-            n_evals = 10000
-            masker_blur = shap.maskers.Image("blur(128,128)", images[0].shape)
-            class_names = {0: 'not-disgraphia', 1: 'disgraphia'}
-            def class_to_names(cls):
-                names = []
-                for c in cls:
-                    names.append(class_names[c])
-                return names
-            explainer = shap.Explainer(predict, masker_blur, output_names=['not-disgraphia', 'disgraphia'])
-            shap_values = explainer(images[:2], max_evals=n_evals, batch_size=batch_size,
-                            outputs=shap.Explanation.argsort.flip[:topk])
-            shap_values.data = shap_values.data.cpu().numpy()[0]
-            shap_values.values = [val for val in np.moveaxis(shap_values.values,-1, 0)]
-            shap.image_plot(shap_values=shap_values.values, pixel_values=shap_values.data, 
-                            labels=shap_values.output_names, true_labels=class_to_names(classes))
-    
+    if out_classes != 1: preds = np.argmax(out.cpu(), axis=1)
+    else: 
+        act = Sigmoid()
+        preds = torch.reshape(act(out), (-1,)).cpu()
+    classes = np.asarray(classes.cpu())
+
     print(f"Test Results {model_name}")
     print("---")
     print("Predictions: ", np.asarray(preds.cpu()))
     print("Classes: ", classes)
     print("---")
-    print("Precision:", round(precision, 3))
-    print("Recall:", round(recall, 3))
-    print("F1:", round(f1, 3))
-    print("Accuracy:", round(accuracy, 3))
+
+    if out_classes != 1:
+        precision, recall, f1, _ = precision_recall_fscore_support(classes, preds, average='macro')
+        accuracy = accuracy_score(classes, preds)
+
+        print("Precision:", round(precision, 3))
+        print("Recall:", round(recall, 3))
+        print("F1:", round(f1, 3))
+        print("Accuracy:", round(accuracy, 3))
+    
+    else:
+        mse = mean_squared_error(classes, preds, squared=False)
+        print("Mean Squarred Error:", round(mse, 3))
+
+    if explain:
+        topk = 2
+        batch_size = 50
+        n_evals = 10000
+        masker_blur = shap.maskers.Image("blur(128,128)", images[0].shape)
+        class_names = {0: 'not-disgraphia', 1: 'disgraphia'}
+        def class_to_names(cls):
+            names = []
+            for c in cls:
+                names.append(class_names[c])
+            return names
+        explainer = shap.Explainer(predict, masker_blur, output_names=['not-disgraphia', 'disgraphia'])
+        shap_values = explainer(images[:2], max_evals=n_evals, batch_size=batch_size,
+                        outputs=shap.Explanation.argsort.flip[:topk])
+        shap_values.data = shap_values.data.cpu().numpy()[0]
+        shap_values.values = [val for val in np.moveaxis(shap_values.values,-1, 0)]
+        shap.image_plot(shap_values=shap_values.values, pixel_values=shap_values.data, 
+                        labels=shap_values.output_names, true_labels=class_to_names(classes))
+    
+    

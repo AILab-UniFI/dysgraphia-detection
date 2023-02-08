@@ -4,6 +4,7 @@ import shutil
 from PIL import Image
 import xml.etree.ElementTree as ET
 from torchvision.transforms.functional import pil_to_tensor, resize
+from torch.nn.functional import pad
 import random
 import pandas as pd
 import numpy as np
@@ -86,21 +87,23 @@ def create_simple_splits(path):
             f.write(f"{t}\n")
 
 def create_multiple_splits(path, labels):
-    if os.path.isdir(os.path.join(path, 'splits')):
-        return
-    else:
-        print("Creating Multiple splits.")
+    if not os.path.isdir(os.path.join(path, 'splits')):
         os.mkdir(os.path.join(path, 'splits'))
-    columns = ['CERTIFIED','EXPERT']
+    columns = ['CERTIFIED', 'EXPERT', 'PROFESSORS']
     labels = pd.read_csv(labels, header=0, index_col=0, sep=";")
 
     for column in columns:
-        os.mkdir(os.path.join(path, 'splits', column))
-        column_dis = [name for name in labels.loc[labels[column] == 1].index.tolist()]
-        print(column_dis)
-        column_not_dis = [name for name in labels.loc[labels[column] == 0].index.tolist()]
+        if os.path.isdir(os.path.join(path, 'splits', column)):
+            continue
+        else:
+            print(f'Creating {column} split.')
+            os.mkdir(os.path.join(path, 'splits', column))
+        column_dis = [name for name in labels.loc[labels[column] >= 0.5].index.tolist()]
+        column_not_dis = [name for name in labels.loc[labels[column] < 0.5].index.tolist()]
         if column == 'CERTIFIED': lenght_splits = [int(len(column_dis) / 4), int(len(column_dis) / 4), int(len(column_dis) / 4), len(column_dis) - int(len(column_dis) / 4)*3]
-        else: lenght_splits = [4, 4, 4, 3]
+        elif column == 'EXPERT': lenght_splits = [4, 4, 4, 3]
+        elif column == 'PROFESSORS': lenght_splits = [5, 5, 5, 4]
+        else: break
         random.shuffle(column_dis)
         it_column_dis = iter(column_dis)
         tests = [list(islice(it_column_dis, elem)) for elem in lenght_splits]
@@ -167,7 +170,7 @@ def get_bhk_features(filename = os.path.join(DYSG,'children/original/A01_1cb57/r
     line = filename.split("/")[-1].split("_")[0]
     csv_path = CSVS / f'{base}_{bhk}.csv'
     df = pd.read_csv(csv_path, header=0, index_col=0)
-
+    # print(csv_path)
     # normalize
     min_max_scaler = preprocessing.MinMaxScaler()
     x_scaled = min_max_scaler.fit_transform(df.values)
@@ -178,6 +181,7 @@ def get_bhk_features(filename = os.path.join(DYSG,'children/original/A01_1cb57/r
     # get features
     global_features = torch.tensor(norm_df.filter(like='global').loc[author].to_numpy(), dtype=torch.float32)
     line_features = torch.tensor(norm_df.filter(like=line).loc[author].to_numpy(), dtype=torch.float32)
+    if line_features.shape[0] == 29: line_features = pad(line_features, (0, 7))
     features = torch.cat((global_features, line_features))
     return features, features.shape[0]
 

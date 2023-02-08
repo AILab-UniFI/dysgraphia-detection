@@ -39,12 +39,16 @@ class ViTWrapper():
             nn.Dropout(0.2),
             nn.Linear(100, cls)
         )
+
+    def binary(self):
+        self.cls = 1
+        self.model.linear_head[4] = nn.Linear(100, 1)
+        self.model.to(self.device)
     
     def set_csv_model(self, base):
         if self.pen_features != 0:
             self.model = ModelCSV(base, self.model, self.pen_features, self.cls, self.device)
             print("CSV Model!")
-            print(self.model)
         else:
             print("Cannot use CSV Model! No Pen Features loaded.")
         return
@@ -92,15 +96,17 @@ class ResnetWrapper():
             nn.Linear(100, cls)
         )
 
+    def binary(self):
+        self.cls = 1
+        self.model.fc[4] = nn.Linear(100, 1)
+        self.model.to(self.device)
+
     def freeze(self):
         print("BRRRRRRRRRRRRRRRRR!")
         for name, param in self.model.named_parameters():
             if 'model.fc' in name: continue
             if 'classify' in name: continue
             param.requires_grad = False
-    
-    def print_model(self):
-        print(self.model)
     
     def get_model(self):
         return self.model
@@ -109,7 +115,6 @@ class ResnetWrapper():
         if self.pen_features != 0:
             self.model = ModelCSV(base, self.model, self.pen_features, self.cls, self.device)
             print("CSV Model!")
-            print(self.model)
         else:
             print("Cannot use CSV Model! No Pen Features loaded.")
         return
